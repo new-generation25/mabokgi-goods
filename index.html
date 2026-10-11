@@ -62,9 +62,9 @@ header{position:sticky;top:0;z-index:20;background:var(--bg);border-bottom:1px s
 main{max-width:1400px;margin:0 auto;padding:14px 20px 80px}
 .bar{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;margin:0 0 12px;font-size:13px;color:var(--sub)}
 .bar label{display:flex;gap:6px;align-items:center;cursor:pointer}
-.rootdrop{display:none;border:2px dashed var(--accent);border-radius:10px;padding:12px;text-align:center;color:var(--accent);font-weight:600;margin-bottom:12px}
-body.dragging .rootdrop{display:block}
-.rootdrop.over{background:var(--drop)}
+/* 끌어다 놓아 순서 바꾸기 — 놓일 자리(왼쪽·오른쪽)를 굵은 선으로 */
+.tile.ins-l{box-shadow:-5px 0 0 var(--accent)}
+.tile.ins-r{box-shadow:5px 0 0 var(--accent)}
 
 /* 바둑판 */
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(var(--tile,220px),100%),1fr));gap:10px;align-items:start}
@@ -227,7 +227,7 @@ const store = {
 const ICON_C = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v6A1.5 1.5 0 0 1 12.5 11H7l-3.2 2.6A.5.5 0 0 1 3 13.2V11h0A1.5 1.5 0 0 1 2 9.5z"/></svg>';
 
 let me = store.get('gm.who', null);   // 댓글에 붙는 이름 (권/마샘), 이 브라우저가 기억한다
-let manifest = null, data = { comments: [], links: {}, hidden: {}, trashed: {}, tags: {}, ratings: {}, pins: {} };
+let manifest = null, data = { comments: [], links: {}, hidden: {}, trashed: {}, tags: {}, ratings: {}, pins: {}, orders: {} };
 let tab = decodeURIComponent(location.hash.slice(1)) || store.get('gm.tab', '');
 // 프로젝트 구분: 전사(판박이) 디자인 테마만 따로 묶고 나머지는 «마그넷 등»
 const GROUPS = [['magnet', '마그넷 등'], ['transfer', '전사 디자인']];
@@ -235,10 +235,10 @@ const TRANSFER_THEMES = ['캐릭터'];
 const groupOf = name => TRANSFER_THEMES.includes(name) ? 'transfer' : 'magnet';
 let group = tab ? groupOf(tab) : store.get('gm.group', 'magnet');
 const themesIn = g => manifest.themes.filter(t => groupOf(t.name) === g);
-let closedSet = new Set(store.get('gm.closed', []));   // 보완안은 기본으로 펼쳐 두고, 접은 것만 기억한다
 let filter = 'all';                  // all | commented | revised(보완안 꼬리표) | hidden | trash
 let view = null;                     // null | '보완안' | '확정안' — 머리의 «… 보기» 꼬리표: 켜 두면 탭을 옮겨도 그 꼬리표가 붙은 것만 보인다
-let sort = store.get('gm.sort3', 'latest');   // latest(기본: 별점 있는 것 먼저 + 최신순) | rating — 2026-10-12 저장 키를 바꿔 기존 선택도 새 기본으로
+let sort = store.get('gm.sort4', 'manual');   // manual(배치순, 기본) | latest | rating — 2026-10-12 키를 바꿔 배치순을 새 기본으로
+//   // latest(기본: 별점 있는 것 먼저 + 최신순) | rating — 2026-10-12 저장 키를 바꿔 기존 선택도 새 기본으로
 let pinMode = false;                 // 상세 창에서 이미지를 누르면 지점을 찍는다
 const SIZE = { min: 100, max: 480, def: 220 };
 let tileSize = Math.min(SIZE.max, Math.max(SIZE.min, +store.get('gm.size', SIZE.def) || SIZE.def));
@@ -292,11 +292,13 @@ async function api(method, b) {
       sb('share_comments?select=*&order=at.asc'), sb('share_state?select=*'),
       sb('share_ratings?select=*'), sb('share_pins?select=*&order=n.asc'),
     ]);
-    const links = {}, hidden = {}, trashed = {}, tags = {}, ratings = {}, pins = {};
-    for (const x of st) { if (x.parent) links[x.key] = x.parent; if (x.hidden) hidden[x.key] = true; if (x.trashed) trashed[x.key] = Date.parse(x.updated_at) || 1; if (x.tag) tags[x.key] = x.tag; }
+    const links = {}, hidden = {}, trashed = {}, tags = {}, ratings = {}, pins = {}, orders = {};
+    for (const x of st) {
+      if (x.key.startsWith('#order/')) { try { orders[x.key.slice(7)] = JSON.parse(x.tag || '[]'); } catch {} continue; }   // 탭별 배치 순서
+      if (x.parent) links[x.key] = x.parent; if (x.hidden) hidden[x.key] = true; if (x.trashed) trashed[x.key] = Date.parse(x.updated_at) || 1; if (x.tag) tags[x.key] = x.tag; }
     for (const x of rt) if (x.stars > 0) (ratings[x.key] = ratings[x.key] || {})[x.who] = x.stars;
     for (const x of ps) (pins[x.key] = pins[x.key] || []).push({ id: 'p:' + x.id, n: x.n, who: x.who, x: x.x, y: x.y, at: Date.parse(x.at) });
-    return { comments: cs.map(c => ({ id: 'c:' + c.id, key: c.key, who: c.who, text: c.text, at: c.at })), links, hidden, trashed, tags, ratings, pins };
+    return { comments: cs.map(c => ({ id: 'c:' + c.id, key: c.key, who: c.who, text: c.text, at: c.at })), links, hidden, trashed, tags, ratings, pins, orders };
   }
   const who = me;
   if (!USERS.includes(who)) throw new Error('이름(권/마샘)을 먼저 고르세요');
@@ -322,6 +324,12 @@ async function api(method, b) {
     const v = typeof b.value === 'string' ? b.value : (b.on ? '보완안' : '-');
     if (!/^(-|보완안|확정안|보완안,확정안)$/.test(v)) throw new Error('꼬리표 값이 잘못됐습니다');
     await setState(b.key, { tag: v }); return { ok: true };
+  }
+  // 탭 하나의 배치 순서 (끌어다 놓기). share_state 에 key '#order/<탭>' 줄 하나, 순서는 tag 칸에 JSON 으로
+  if (b.action === 'order') {
+    const keys = Array.isArray(b.keys) ? b.keys.filter(k => typeof k === 'string' && k.startsWith(b.theme + '/')) : [];
+    if (!b.theme || !keys.length || keys.length > 3000) throw new Error('순서 목록이 잘못됐습니다');
+    await setState('#order/' + b.theme, { tag: JSON.stringify(keys) }); return { ok: true };
   }
   if (b.action === 'rate') {
     const n = Math.round(+b.stars);
@@ -352,7 +360,7 @@ async function start() {
     manifest ? manifest : fetch('manifest.json', { cache: 'no-store' }).then(r => r.json()),
     api('GET'),
   ]);
-  manifest = m; data = { hidden: {}, trashed: {}, tags: {}, ratings: {}, pins: {}, ...d };
+  manifest = m; data = { hidden: {}, trashed: {}, tags: {}, ratings: {}, pins: {}, orders: {}, ...d };
   if (!manifest.themes.find(t => t.name === tab)) tab = manifest.themes[0]?.name || '';
   render();
   clearInterval(start.poll);
@@ -365,7 +373,7 @@ async function refresh() {
   if (ta && ta.tagName === 'TEXTAREA' && ta.value) return;
   try {
     const d = await api('GET');
-    const nd = { hidden: {}, trashed: {}, tags: {}, ratings: {}, pins: {}, ...d };
+    const nd = { hidden: {}, trashed: {}, tags: {}, ratings: {}, pins: {}, orders: {}, ...d };
     if (JSON.stringify(nd) !== JSON.stringify(data)) { data = nd; renderGrid(); if (current) renderDetail(); }
   } catch {}
 }
@@ -373,24 +381,11 @@ async function refresh() {
 const commentsOf = key => data.comments.filter(c => c.key === key);
 const theme = () => manifest.themes.find(t => t.name === tab);
 const itemOf = key => { for (const t of manifest.themes) for (const i of t.items) if (i.key === key) return i; return null; };
-function parentOf(key, keys) { const p = data.links[key]; return p && keys.has(p) ? p : null; }
-function isUnder(key, ancestor) {           // key 가 ancestor 의 하위(자기 포함)인가
-  for (let k = key, i = 0; k && i < 500; k = data.links[k], i++) if (k === ancestor) return true;
-  return false;
-}
-function isHidden(key) {                    // 자기나 상위가 숨겨졌는가
-  for (let k = key, i = 0; k && i < 500; k = data.links[k], i++) if (data.hidden[k]) return true;
-  return false;
-}
+// 2026-10-12 하위(보완안 연결) 개념을 없앴다 — 모두 한 줄로, 순서는 끌어다 놓아 정한다.
+// 예전 상위-하위 기록(data.links)은 서버에 그대로 두고 화면에서만 쓰지 않는다
+const isHidden = key => !!data.hidden[key];
 function treeOf(t) {
-  const items = t.items.filter(i => !isHidden(i.key) && !data.trashed[i.key]);
-  const keys = new Set(items.map(i => i.key));
-  const kids = {}, roots = [];
-  for (const it of items) {
-    const p = parentOf(it.key, keys);
-    if (p) (kids[p] = kids[p] || []).push(it); else roots.push(it);
-  }
-  return { kids, roots };
+  return { kids: {}, roots: t.items.filter(i => !isHidden(i.key) && !data.trashed[i.key]) };
 }
 const hiddenOf = t => t.items.filter(i => data.hidden[i.key] && !data.trashed[i.key]);
 // 꼬리표(보완안·확정안): 페이지에서 우클릭으로 붙이고 뗀 값(data.tags)이 tags.json(manifest 의 it.tag)보다 앞선다
@@ -407,11 +402,16 @@ const trashOf = t => t.items.filter(i => data.trashed[i.key]).sort((a, b) => dat
 // 정렬 (2026-10-12) — 최신순(기본): 별점 있는 것을 먼저, 그 안에서 최근 등록이 위로
 //                     별점순: 평균 별점 높은 순, 같으면 최근 등록이 위로. 별점 없는 것은 맨 뒤
 // manifest 는 파일 수정 시각 오름차순이라, 같은 시각이면 목록에서 뒤에 있을수록 최근이다
-function srt(arr) {
+// 배치순(기본, 2026-10-12): 끌어다 놓아 정한 순서(data.orders[탭]). 순서에 아직 없는 것(새 이미지)은
+//                         최신순 규칙대로 맨 앞에 붙는다
+function srt(arr, how = sort) {
   const sc = it => ratingOf(it.key)?.avg ?? -1;
   const newer = (a, b) => (b[0].added || '').localeCompare(a[0].added || '') || (b[1] - a[1]);
-  const byStar = sort === 'rating' ? (a, b) => sc(b[0]) - sc(a[0]) : (a, b) => (sc(b[0]) > 0) - (sc(a[0]) > 0);
-  return arr.map((it, i) => [it, i]).sort((a, b) => byStar(a, b) || newer(a, b)).map(x => x[0]);
+  const byStar = how === 'rating' ? (a, b) => sc(b[0]) - sc(a[0]) : (a, b) => (sc(b[0]) > 0) - (sc(a[0]) > 0);
+  const out = arr.map((it, i) => [it, i]).sort((a, b) => byStar(a, b) || newer(a, b)).map(x => x[0]);
+  if (how !== 'manual') return out;
+  const pos = it => (data.orders[it.key.split('/')[0]] || []).indexOf(it.key);
+  return [...out.filter(it => pos(it) < 0), ...out.filter(it => pos(it) >= 0).sort((a, b) => pos(a) - pos(b))];
 }
 function ratingOf(key) {
   const r = data.ratings[key] || {}, v = Object.values(r);
@@ -426,7 +426,7 @@ function seqOf(t) {                          // 지금 필터에서 보이는 �
   srt(filter === 'commented' ? roots.filter(r => hasCommentBelow(r.key, kids)) : filter === 'revised' ? roots.filter(r => tagOf(r)) : roots).forEach(walk);
   return out;
 }
-const hasCommentBelow = (key, kids) => commentsOf(key).length > 0 || (kids[key] || []).some(c => hasCommentBelow(c.key, kids));
+const hasCommentBelow = key => commentsOf(key).length > 0;
 
 /* ---------- 그리기: 바둑판 ---------- */
 function render() {
@@ -443,9 +443,8 @@ function render() {
     <div class="bar">
       <span class="filters" id="filters"></span>
       <span class="filters" id="sorts"></span>
-      <span class="hint">누르면 크게 보고 댓글·별점 · 우클릭으로 보완안·확정안 체크, 숨기기, 삭제 · 다른 썸네일 위로 끌어다 놓으면 보완안</span>
+      <span class="hint">누르면 크게 보고 댓글·별점 · 우클릭으로 보완안·확정안 체크, 숨기기, 삭제 · 끌어다 놓아 순서 바꾸기</span>
     </div>
-    <div class="rootdrop" id="rootdrop">여기에 놓으면 최상위로 꺼냅니다</div>
     <div id="list"></div>
   </main>`;
   document.querySelectorAll('.whoami button').forEach(b => b.onclick = () => setMe(b.dataset.who));
@@ -454,10 +453,6 @@ function render() {
     document.documentElement.style.setProperty('--tile', tileSize + 'px');
     store.set('gm.size', tileSize);
   };
-  const rd = $('#rootdrop');
-  rd.ondragover = e => { e.preventDefault(); rd.classList.add('over'); };
-  rd.ondragleave = () => rd.classList.remove('over');
-  rd.ondrop = e => { e.preventDefault(); rd.classList.remove('over'); const k = dragKey; endDrag(); if (k) setParent(k, null); };
   renderGrid();
 }
 
@@ -524,9 +519,9 @@ function renderGrid() {
   $('#filters').innerHTML = [['all', '전체', roots.length], ['commented', '댓글 있는 것', commented.length], ['revised', '보완안', rev.length], ['hidden', '숨긴 것', hid.length], ['trash', '휴지통', trs.length]]
     .map(([v, l, n]) => `<button data-f="${v}" aria-pressed="${filter === v}">${l} ${n}</button>`).join('');
   $('#filters').querySelectorAll('button').forEach(b => b.onclick = () => { filter = b.dataset.f; renderGrid(); });
-  $('#sorts').innerHTML = [['latest', '최신순'], ['rating', '별점순']]
+  $('#sorts').innerHTML = [['manual', '배치순'], ['latest', '최신순'], ['rating', '별점순']]
     .map(([v, l]) => `<button data-s="${v}" aria-pressed="${sort === v}">${l}</button>`).join('');
-  $('#sorts').querySelectorAll('button').forEach(b => b.onclick = () => { sort = b.dataset.s; store.set('gm.sort3', sort); renderGrid(); });
+  $('#sorts').querySelectorAll('button').forEach(b => b.onclick = () => { sort = b.dataset.s; store.set('gm.sort4', sort); renderGrid(); });
   const flat = filter === 'hidden' || filter === 'trash';
   const shown = filter === 'trash' ? trs : srt(filter === 'hidden' ? hid : filter === 'commented' ? commented : filter === 'revised' ? rev : roots);
   const scroll = window.scrollY;
@@ -541,12 +536,10 @@ function tileHTML(it, kids, hid = false) {
   const cs = commentsOf(it.key);
   const rt = ratingOf(it.key);
   const full = rt ? Math.round(rt.avg) : 0;
-  const ch = kids[it.key] || [];
-  const open = ch.length && !closedSet.has(it.key);
   const whos = [...new Set(cs.map(c => c.who))];
   const tg = tagOf(it);
   return `
-  <div class="tile ${open ? 'open' : ''} ${hid ? 'hid' : ''} ${current === it.key ? 'cur' : ''}" draggable="${!hid}" data-key="${esc(it.key)}" title="${esc(it.name)}">
+  <div class="tile ${hid ? 'hid' : ''} ${current === it.key ? 'cur' : ''}" draggable="${!hid}" data-key="${esc(it.key)}" title="${esc(it.name)}">
     <div class="cap">
       <span class="nm">${esc(it.name)}</span>
       ${tg ? `<span class="rtag" title="${it.of && !data.tags[it.key] ? esc(it.of.split('/').pop()) + ' 댓글 반영' : '우클릭으로 떼기'}">${esc(tg)}</span>` : ''}
@@ -559,16 +552,13 @@ function tileHTML(it, kids, hid = false) {
     ${hid ? `<span class="hidtag">${data.trashed[it.key] ? '휴지통' : '숨김'}</span>` : ''}
     <button class="copybtn" data-copy="${esc(it.key)}" title="이미지를 클립보드에 복사">복사</button>
     ${(data.pins[it.key] || []).length ? `<span class="pinbadge" title="체크 지점 ${data.pins[it.key].length}개">● ${data.pins[it.key].length}</span>` : ''}
-    ${ch.length ? `<button class="kids" data-toggle="${esc(it.key)}" title="보완안 펼치기/접기">보완안 ${ch.length} ${open ? '▴' : '▾'}</button>` : ''}
-  </div>
-  ${open ? `<div class="sub"><p>«${esc(it.name)}» 의 보완안</p><div class="grid">${srt(ch).map(c => tileHTML(c, kids)).join('')}</div></div>` : ''}`;
+  </div>`;
 }
 
 function bindGrid(list, t) {
   list.querySelectorAll('.tile').forEach(tile => {
     const k = tile.dataset.key;
     tile.onclick = e => {
-      if (e.target.closest('[data-toggle]')) return;
       if (e.target.closest('[data-copy]')) { e.stopPropagation(); copyImage(k); return; }
       openDetail(k);
     };
@@ -581,25 +571,39 @@ function bindGrid(list, t) {
       document.body.classList.add('dragging');
     };
     tile.ondragend = endDrag;
+    const side = e => { const r = tile.getBoundingClientRect(); return e.clientX > r.left + r.width / 2; };   // true = 오른쪽(뒤)
     tile.ondragover = e => {
-      if (!dragKey || isUnder(k, dragKey)) return;
-      e.preventDefault(); e.stopPropagation(); tile.classList.add('over');
+      if (!dragKey || dragKey === k || dragKey.split('/')[0] !== k.split('/')[0] || tile.classList.contains('hid')) return;
+      e.preventDefault(); e.stopPropagation();
+      const after = side(e);
+      tile.classList.toggle('ins-r', after); tile.classList.toggle('ins-l', !after);
     };
-    tile.ondragleave = e => { if (!tile.contains(e.relatedTarget)) tile.classList.remove('over'); };
+    tile.ondragleave = e => { if (!tile.contains(e.relatedTarget)) tile.classList.remove('ins-l', 'ins-r'); };
     tile.ondrop = e => {
-      e.preventDefault(); e.stopPropagation(); tile.classList.remove('over');
-      const src = dragKey; endDrag();
-      if (!src || isUnder(k, src)) return;
-      setParent(src, k);
+      e.preventDefault(); e.stopPropagation();
+      const src = dragKey, after = side(e); endDrag();
+      if (src && src !== k) moveTo(src, k, after);
     };
   });
-  list.querySelectorAll('[data-toggle]').forEach(b => b.onclick = e => {
-    e.stopPropagation();
-    const k = b.dataset.toggle;
-    closedSet.has(k) ? closedSet.delete(k) : closedSet.add(k);
-    store.set('gm.closed', [...closedSet]);
-    renderGrid();
-  });
+}
+
+// 끌어다 놓은 대로 그 탭의 순서를 다시 짜서 저장한다 (모두에게 같은 순서)
+async function moveTo(src, target, after) {
+  const th = src.split('/')[0], t = manifest.themes.find(x => x.name === th);
+  if (!t || target.split('/')[0] !== th) return;
+  const before = data.orders[th];
+  const keys = srt(t.items).map(i => i.key).filter(k => k !== src);   // 지금 화면에 보이는 정렬 그대로를 바탕으로
+  keys.splice(keys.indexOf(target) + (after ? 1 : 0), 0, src);
+  data.orders[th] = keys;
+  if (sort !== 'manual') { sort = 'manual'; store.set('gm.sort4', sort); }
+  renderGrid();
+  try {
+    await api('POST', { action: 'order', theme: th, keys });
+    toast('순서를 바꿨습니다');
+  } catch (err) {
+    if (before) data.orders[th] = before; else delete data.orders[th];
+    renderGrid(); toast('순서를 저장하지 못했습니다: ' + err.message);
+  }
 }
 
 function showMenu(x, y, key) {
@@ -736,24 +740,7 @@ addEventListener('resize', () => { if (current) renderDetail.layout?.(); });
 function endDrag() {
   dragKey = null;
   document.body.classList.remove('dragging');
-  document.querySelectorAll('.lifted,.over').forEach(el => el.classList.remove('lifted', 'over'));
-}
-
-async function setParent(child, parent) {
-  if ((data.links[child] || null) === parent) return;
-  if (parent && isUnder(parent, child)) { toast('자기 하위로는 넣을 수 없습니다'); return; }
-  const before = data.links[child];
-  if (parent) { data.links[child] = parent; closedSet.delete(parent); store.set('gm.closed', [...closedSet]); }
-  else delete data.links[child];
-  renderGrid(); if (current) renderDetail();
-  try {
-    await api('POST', { action: 'link', child, parent });
-    toast(parent ? '보완안으로 넣었습니다' : '최상위로 꺼냈습니다');
-  } catch (err) {
-    if (before) data.links[child] = before; else delete data.links[child];
-    renderGrid(); if (current) renderDetail();
-    toast('옮기지 못했습니다: ' + err.message);
-  }
+  document.querySelectorAll('.lifted,.over,.ins-l,.ins-r').forEach(el => el.classList.remove('lifted', 'over', 'ins-l', 'ins-r'));
 }
 
 /* ---------- 상세 창 (크게 보기 + 댓글) ---------- */
@@ -775,14 +762,11 @@ function renderDetail() {
   const it = itemOf(current);
   if (!it) { closeDetail(); return; }
   const t = manifest.themes.find(x => x.items.includes(it));
-  const { kids } = treeOf(t);
   let seq = seqOf(t), idx = seq.findIndex(x => x.key === it.key);
   if (idx < 0) { seq = [it]; idx = 0; }
   const mine = (data.ratings[it.key] || {})[me] || 0;
   const others = Object.entries(data.ratings[it.key] || {}).filter(([w]) => w !== me);
   const hid = isHidden(it.key);
-  const parent = data.links[it.key] && itemOf(data.links[it.key]);
-  const ch = kids[it.key] || [];
   const cs = commentsOf(it.key);
   const draft = $('#dlg textarea')?.value || '';
   const pins = data.pins[it.key] || [];
@@ -799,7 +783,6 @@ function renderDetail() {
       <button class="x" id="x" aria-label="닫기">×</button>
       <h2>${esc(it.name)}</h2>
       <div class="meta">${esc(t.name)} · ${idx + 1}/${seq.length} · ${esc(it.added.replace('T', ' '))} 등록 · 원본 ${it.w}×${it.h}</div>
-      ${parent ? `<div class="row">상위 시안 <button class="crumb" data-open="${esc(parent.key)}">${esc(parent.name)}</button></div>` : ''}
       <div class="row">별점 <span class="stars" id="stars">${[1, 2, 3, 4, 5].map(n => `<button data-s="${n}" class="${n <= mine ? 'on' : ''}" aria-label="${n}점">★</button>`).join('')}</span>
         ${others.map(([w, n]) => `<span class="others">${esc(w)} <b>${'★'.repeat(n)}</b> ${n}점</span>`).join(' ')}</div>
       <div class="row">지점 <button class="ghost ${pinMode ? 'on' : ''}" id="pinMode">${pinMode ? '✓ 지점 체크 중' : '＋ 지점 체크'}</button>
@@ -807,12 +790,7 @@ function renderDetail() {
       ${pins.length ? `<div class="pinlist">${pins.map(p => `<span class="pchip" data-n="${p.n}">
         <button class="go" data-n="${p.n}" title="${p.n}번으로 댓글 쓰기"><span class="num ${esc(p.who)}">${p.n}</span>${esc(p.who)}</button>
         ${p.who === me ? `<button class="rm" data-id="${esc(p.id)}" data-n="${p.n}" title="${p.n}번 지점 지우기" aria-label="${p.n}번 지점 지우기">×</button>` : ''}</span>`).join('')}</div>` : ''}
-      <div class="row">위치 <select id="move"></select>
-        <button class="ghost" id="hideBtn">${data.hidden[it.key] ? '다시 보이기' : hid ? '상위 시안이 숨겨져 있음' : '숨기기'}</button></div>
-      ${ch.length ? `<div class="row">보완안 ${ch.length}개</div><div class="strip">${ch.map(c => {
-        const n = commentsOf(c.key).length;
-        return `<button data-open="${esc(c.key)}" title="${esc(c.name)}"><img src="${esc(c.src)}" alt="">${n ? `<span class="c">${n}</span>` : ''}</button>`;
-      }).join('')}</div>` : ''}
+      <div class="row"><button class="ghost" id="hideBtn">${hid ? '다시 보이기' : '숨기기'}</button></div>
       <ul class="comments">${cs.length ? cs.map(c => `
         <li><span class="who ${esc(c.who)}">${esc(c.who)}</span><time>${fmt(c.at)}</time>
         ${c.who === me ? `<button class="del" data-del="${esc(c.id)}">삭제</button>` : ''}
@@ -868,13 +846,7 @@ function renderDetail() {
   dlg.querySelectorAll('[data-open]').forEach(b => b.onclick = () => openDetail(b.dataset.open));
 
   $('#stars').querySelectorAll('button').forEach(b => b.onclick = () => setRating(it.key, +b.dataset.s === mine ? 0 : +b.dataset.s));
-  $('#hideBtn').onclick = () => { if (data.hidden[it.key] || !hid) setHidden(it.key, !data.hidden[it.key]); };
-  const sel = $('#move');
-  const cur = data.links[it.key] || '';
-  sel.innerHTML = `<option value="">최상위</option>` + t.items
-    .filter(i => !isUnder(i.key, it.key))
-    .map(i => `<option value="${esc(i.key)}" ${i.key === cur ? 'selected' : ''}>↳ ${esc(i.name)} 의 보완안</option>`).join('');
-  sel.onchange = () => setParent(it.key, sel.value || null);
+  $('#hideBtn').onclick = () => setHidden(it.key, !hid);
 
   const f = $('#cf'), ta = $('textarea', f);
   ta.onkeydown = e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); f.requestSubmit(); } };
