@@ -93,13 +93,15 @@ body.dragging .rootdrop{display:block}
 .sub .sub{background:var(--bg)}
 
 /* 상세 창 */
-.dlg{position:fixed;inset:0;z-index:40;background:var(--shade);display:none;align-items:center;justify-content:center;padding:24px}
+.dlg{position:fixed;inset:0;z-index:40;background:var(--shade);display:none;align-items:center;justify-content:center;padding:clamp(12px,2vw,32px)}
 .dlg.on{display:flex}
-.box{position:relative;background:var(--panel);border-radius:14px;width:min(1180px,100%);height:min(820px,100%);display:grid;grid-template-columns:minmax(0,1.5fr) minmax(300px,1fr);overflow:hidden}
-.big{background:var(--img-bg);display:flex;align-items:center;justify-content:center;min-height:0;position:relative}
-.big img{max-width:100%;max-height:100%;object-fit:contain;cursor:zoom-in}
+/* 상세 창은 PC 창 크기에 맞춰 커진다 — 늘어난 자리는 이미지 쪽으로, 오른쪽 댓글 칸은 320~460px */
+.box{position:relative;background:var(--panel);border-radius:14px;width:100%;height:100%;display:grid;grid-template-columns:minmax(0,1fr) clamp(320px,24vw,460px);overflow:hidden}
+.big{background:var(--img-bg);display:flex;align-items:center;justify-content:center;min-height:0;position:relative;container-type:size}
+/* 영역에 꽉 차게 키운다(원본보다 커져도). 상자 = 실제 그림 비율이라 체크 지점(핀) 좌표가 맞는다. --ar = 가로/세로 */
+.big img{width:min(100cqw,100cqh * var(--ar,1));height:auto;aspect-ratio:var(--ar,1);max-width:100%;max-height:100%;cursor:zoom-in}
 .big.zoom{overflow:auto;display:block}
-.big.zoom img{max-width:none;max-height:none;cursor:zoom-out}
+.big.zoom img{width:auto;height:auto;max-width:none;max-height:none;cursor:zoom-out}
 .big.picking img{cursor:crosshair}
 .pins{position:absolute;pointer-events:none}
 .pin{position:absolute;transform:translate(-50%,-50%);width:28px;height:28px;border-radius:50%;border:2px solid #fff;color:#fff;font-weight:800;font-size:13px;line-height:24px;text-align:center;padding:0;pointer-events:auto;box-shadow:0 1px 5px rgba(0,0,0,.55);transition:transform .12s}
@@ -767,7 +769,7 @@ function renderDetail() {
   $('#dlg').innerHTML = `
   <div class="box" role="dialog" aria-label="${esc(it.name)}">
     <div class="big" id="big">
-      <img src="${esc(it.src)}" alt="${esc(it.name)}">
+      <img src="${esc(it.src)}" alt="${esc(it.name)}" style="--ar:${it.w / it.h}">
       <div class="pins" id="pins">${pins.map(p => `<button class="pin ${esc(p.who)}" style="left:${p.x * 100}%;top:${p.y * 100}%" data-n="${p.n}" data-id="${esc(p.id)}" data-who="${esc(p.who)}" title="${p.n}번 · ${esc(p.who)}${p.who === me ? ' (우클릭으로 지우기)' : ''}">${p.n}</button>`).join('')}</div>
       ${pinMode ? '<span class="pickhint">짚을 곳을 누르세요 · 다 찍었으면 «지점 체크» 를 다시 누릅니다</span>' : ''}
       ${idx > 0 ? '<button class="nav prev" data-go="-1" aria-label="이전">‹</button>' : ''}
