@@ -65,6 +65,11 @@ main{max-width:1400px;margin:0 auto;padding:14px 20px 80px}
 /* 끌어다 놓아 순서 바꾸기 — 놓일 자리(왼쪽·오른쪽)를 굵은 선으로 */
 .tile.ins-l{box-shadow:-5px 0 0 var(--accent)}
 .tile.ins-r{box-shadow:5px 0 0 var(--accent)}
+/* 여러 장 고르기 (Ctrl/⌘+클릭, Shift+클릭) */
+.tile.sel{outline:3px solid var(--accent);outline-offset:-3px}
+.tile.sel::after{content:'✓';position:absolute;left:6px;top:36px;width:24px;height:24px;border-radius:50%;background:var(--accent);color:var(--accent-ink);font-weight:800;font-size:14px;line-height:24px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.selbar{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--accent)}
+.selbar button{border:1px solid var(--line);background:none;border-radius:999px;padding:2px 10px;font-size:12px;color:var(--sub)}
 
 /* 바둑판 */
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(var(--tile,220px),100%),1fr));gap:10px;align-items:start}
@@ -244,6 +249,8 @@ const SIZE = { min: 100, max: 480, def: 220 };
 let tileSize = Math.min(SIZE.max, Math.max(SIZE.min, +store.get('gm.size', SIZE.def) || SIZE.def));
 document.documentElement.style.setProperty('--tile', tileSize + 'px');
 let dragKey = null, current = null;   // current = 상세 창에 열린 이미지 key
+let dragKeys = [];                   // 끌고 있는 것들 (여러 장 골랐으면 전부, 화면 순서대로)
+let selected = new Set(), lastSel = null;   // 여러 장 고르기 — 지금 탭 안에서만
 
 // 확인 창 — 브라우저 confirm() 은 앱 안 브라우저에서 안 뜨고 바로 false 가 되므로 페이지 안에 직접 띄운다
 function ask(msg) {
@@ -443,7 +450,8 @@ function render() {
     <div class="bar">
       <span class="filters" id="filters"></span>
       <span class="filters" id="sorts"></span>
-      <span class="hint">누르면 크게 보고 댓글·별점 · 우클릭으로 보완안·확정안 체크, 숨기기, 삭제 · 끌어다 놓아 순서 바꾸기</span>
+      <span class="selbar" id="selbar"></span>
+      <span class="hint">누르면 크게 보고 댓글·별점 · 우클릭으로 보완안·확정안 체크, 숨기기, 삭제 · 끌어다 놓아 순서 바꾸기 (Ctrl·Shift+클릭으로 여러 장 골라 함께)</span>
     </div>
     <div id="list"></div>
   </main>`;
@@ -560,20 +568,29 @@ function bindGrid(list, t) {
     const k = tile.dataset.key;
     tile.onclick = e => {
       if (e.target.closest('[data-copy]')) { e.stopPropagation(); copyImage(k); return; }
+      if (e.ctrlKey || e.metaKey) { selected.has(k) ? selected.delete(k) : selected.add(k); lastSel = k; paintSel(); return; }
+      if (e.shiftKey && lastSel) {
+        const order = [...list.querySelectorAll('.tile')].map(x => x.dataset.key);
+        const [a, b] = [order.indexOf(lastSel), order.indexOf(k)].sort((x, y) => x - y);
+        if (a >= 0) { order.slice(a, b + 1).forEach(x => selected.add(x)); paintSel(); return; }
+      }
+      if (selected.size) clearSel();
       openDetail(k);
     };
     tile.oncontextmenu = e => { e.preventDefault(); showMenu(e.clientX, e.clientY, k); };
     tile.ondragstart = e => {
       dragKey = k;
-      e.dataTransfer.setData('text/plain', k);
+      const order = [...list.querySelectorAll('.tile')].map(x => x.dataset.key);
+      dragKeys = selected.has(k) && selected.size > 1 ? order.filter(x => selected.has(x)) : [k];
+      e.dataTransfer.setData('text/plain', dragKeys.join('\n'));
       e.dataTransfer.effectAllowed = 'move';
-      tile.classList.add('lifted');
+      list.querySelectorAll('.tile').forEach(x => { if (dragKeys.includes(x.dataset.key)) x.classList.add('lifted'); });
       document.body.classList.add('dragging');
     };
     tile.ondragend = endDrag;
     const side = e => { const r = tile.getBoundingClientRect(); return e.clientX > r.left + r.width / 2; };   // true = 오른쪽(뒤)
     tile.ondragover = e => {
-      if (!dragKey || dragKey === k || dragKey.split('/')[0] !== k.split('/')[0] || tile.classList.contains('hid')) return;
+      if (!dragKey || dragKeys.includes(k) || dragKey.split('/')[0] !== k.split('/')[0] || tile.classList.contains('hid')) return;
       e.preventDefault(); e.stopPropagation();
       const after = side(e);
       tile.classList.toggle('ins-r', after); tile.classList.toggle('ins-l', !after);
@@ -581,25 +598,38 @@ function bindGrid(list, t) {
     tile.ondragleave = e => { if (!tile.contains(e.relatedTarget)) tile.classList.remove('ins-l', 'ins-r'); };
     tile.ondrop = e => {
       e.preventDefault(); e.stopPropagation();
-      const src = dragKey, after = side(e); endDrag();
-      if (src && src !== k) moveTo(src, k, after);
+      const srcs = dragKeys.slice(), after = side(e); endDrag();
+      if (srcs.length && !srcs.includes(k)) moveTo(srcs, k, after);
     };
   });
+  paintSel();
 }
 
+function paintSel() {
+  const keys = new Set([...document.querySelectorAll('#list .tile')].map(x => x.dataset.key));
+  [...selected].forEach(x => { if (!keys.has(x)) selected.delete(x); });   // 지금 화면(탭)에 없는 것은 풀린다
+  document.querySelectorAll('#list .tile').forEach(x => x.classList.toggle('sel', selected.has(x.dataset.key)));
+  const bar = $('#selbar');
+  if (!bar) return;
+  bar.innerHTML = selected.size ? `${selected.size}개 선택 · 하나를 끌면 함께 옮겨집니다 <button data-clear>× 선택 해제</button>` : '';
+  bar.querySelector('[data-clear]')?.addEventListener('click', clearSel);
+}
+function clearSel() { selected.clear(); lastSel = null; paintSel(); }
+
 // 끌어다 놓은 대로 그 탭의 순서를 다시 짜서 저장한다 (모두에게 같은 순서)
-async function moveTo(src, target, after) {
-  const th = src.split('/')[0], t = manifest.themes.find(x => x.name === th);
-  if (!t || target.split('/')[0] !== th) return;
+async function moveTo(srcs, target, after) {
+  srcs = [].concat(srcs);
+  const th = target.split('/')[0], t = manifest.themes.find(x => x.name === th);
+  if (!t || srcs.some(x => x.split('/')[0] !== th)) return;
   const before = data.orders[th];
-  const keys = srt(t.items).map(i => i.key).filter(k => k !== src);   // 지금 화면에 보이는 정렬 그대로를 바탕으로
-  keys.splice(keys.indexOf(target) + (after ? 1 : 0), 0, src);
+  const keys = srt(t.items).map(i => i.key).filter(k => !srcs.includes(k));   // 지금 화면에 보이는 정렬 그대로를 바탕으로
+  keys.splice(keys.indexOf(target) + (after ? 1 : 0), 0, ...srcs);
   data.orders[th] = keys;
   if (sort !== 'manual') { sort = 'manual'; store.set('gm.sort4', sort); }
   renderGrid();
   try {
     await api('POST', { action: 'order', theme: th, keys });
-    toast('순서를 바꿨습니다');
+    toast(srcs.length > 1 ? `${srcs.length}장을 함께 옮겼습니다` : '순서를 바꿨습니다');
   } catch (err) {
     if (before) data.orders[th] = before; else delete data.orders[th];
     renderGrid(); toast('순서를 저장하지 못했습니다: ' + err.message);
@@ -738,7 +768,7 @@ async function delPin(key, id) {
 addEventListener('resize', () => { if (current) renderDetail.layout?.(); });
 
 function endDrag() {
-  dragKey = null;
+  dragKey = null; dragKeys = [];
   document.body.classList.remove('dragging');
   document.querySelectorAll('.lifted,.over,.ins-l,.ins-r').forEach(el => el.classList.remove('lifted', 'over', 'ins-l', 'ins-r'));
 }
@@ -883,7 +913,7 @@ function fmt(iso) {
 $('#dlg').addEventListener('click', e => { if (e.target.id === 'dlg') closeDetail(); });
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') closeMenu();
-  if (!current) return;
+  if (!current) { if (e.key === 'Escape' && selected.size && !document.querySelector('.gate')) clearSel(); return; }
   if (e.key === 'Escape') { closeDetail(); return; }
   if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
   if (e.key === 'ArrowLeft') $('#dlg .prev')?.click();
