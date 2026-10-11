@@ -236,7 +236,7 @@ const themesIn = g => manifest.themes.filter(t => groupOf(t.name) === g);
 let closedSet = new Set(store.get('gm.closed', []));   // 보완안은 기본으로 펼쳐 두고, 접은 것만 기억한다
 let filter = 'all';                  // all | commented | revised(보완안 꼬리표) | hidden | trash
 let view = null;                     // null | '보완안' | '확정안' — 머리의 «… 보기» 꼬리표: 지금 그룹 전체에서 모아 본다
-let sort = store.get('gm.sort2', 'rating');   // rating(기본) | added — 2026-10-11 기본을 별점순으로, 저장 키를 바꿔 기존 선택도 새 기본으로
+let sort = store.get('gm.sort3', 'latest');   // latest(기본: 별점 있는 것 먼저 + 최신순) | rating — 2026-10-12 저장 키를 바꿔 기존 선택도 새 기본으로
 let pinMode = false;                 // 상세 창에서 이미지를 누르면 지점을 찍는다
 const SIZE = { min: 100, max: 480, def: 220 };
 let tileSize = Math.min(SIZE.max, Math.max(SIZE.min, +store.get('gm.size', SIZE.def) || SIZE.def));
@@ -401,10 +401,14 @@ const hasMark = (it, m) => marksOf(it).includes(m);
 // 머리 «… 보기»: 지금 그룹의 모든 탭에서 꼬리표가 붙은 것 (숨김·휴지통 제외), 탭별로
 const viewSets = m => themesIn(group).map(t => [t, srt(t.items.filter(i => hasMark(i, m) && !isHidden(i.key) && !data.trashed[i.key]))]).filter(([, a]) => a.length);
 const trashOf = t => t.items.filter(i => data.trashed[i.key]).sort((a, b) => data.trashed[b.key] - data.trashed[a.key]);   // 최근 삭제한 것이 먼저
-function srt(arr) {                          // 별점순이면 평균 높은 순, 별점 없는 것은 뒤로 (같으면 등록순)
-  if (sort !== 'rating') return arr;
+// 정렬 (2026-10-12) — 최신순(기본): 별점 있는 것을 먼저, 그 안에서 최근 등록이 위로
+//                     별점순: 평균 별점 높은 순, 같으면 최근 등록이 위로. 별점 없는 것은 맨 뒤
+// manifest 는 파일 수정 시각 오름차순이라, 같은 시각이면 목록에서 뒤에 있을수록 최근이다
+function srt(arr) {
   const sc = it => ratingOf(it.key)?.avg ?? -1;
-  return arr.map((it, i) => [it, i]).sort((a, b) => (sc(b[0]) - sc(a[0])) || (a[1] - b[1])).map(x => x[0]);
+  const newer = (a, b) => (b[0].added || '').localeCompare(a[0].added || '') || (b[1] - a[1]);
+  const byStar = sort === 'rating' ? (a, b) => sc(b[0]) - sc(a[0]) : (a, b) => (sc(b[0]) > 0) - (sc(a[0]) > 0);
+  return arr.map((it, i) => [it, i]).sort((a, b) => byStar(a, b) || newer(a, b)).map(x => x[0]);
 }
 function ratingOf(key) {
   const r = data.ratings[key] || {}, v = Object.values(r);
@@ -507,9 +511,9 @@ function renderGrid() {
   $('#filters').innerHTML = [['all', '전체', roots.length], ['commented', '댓글 있는 것', commented.length], ['revised', '보완안', rev.length], ['hidden', '숨긴 것', hid.length], ['trash', '휴지통', trs.length]]
     .map(([v, l, n]) => `<button data-f="${v}" aria-pressed="${filter === v}">${l} ${n}</button>`).join('');
   $('#filters').querySelectorAll('button').forEach(b => b.onclick = () => { filter = b.dataset.f; renderGrid(); });
-  $('#sorts').innerHTML = [['added', '등록순'], ['rating', '별점순']]
+  $('#sorts').innerHTML = [['latest', '최신순'], ['rating', '별점순']]
     .map(([v, l]) => `<button data-s="${v}" aria-pressed="${sort === v}">${l}</button>`).join('');
-  $('#sorts').querySelectorAll('button').forEach(b => b.onclick = () => { sort = b.dataset.s; store.set('gm.sort2', sort); renderGrid(); });
+  $('#sorts').querySelectorAll('button').forEach(b => b.onclick = () => { sort = b.dataset.s; store.set('gm.sort3', sort); renderGrid(); });
   const flat = filter === 'hidden' || filter === 'trash';
   const shown = filter === 'trash' ? trs : srt(filter === 'hidden' ? hid : filter === 'commented' ? commented : filter === 'revised' ? rev : roots);
   const scroll = window.scrollY;
