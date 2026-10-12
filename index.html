@@ -240,7 +240,7 @@ const TRANSFER_THEMES = ['캐릭터'];
 const groupOf = name => TRANSFER_THEMES.includes(name) ? 'transfer' : 'magnet';
 let group = tab ? groupOf(tab) : store.get('gm.group', 'magnet');
 const themesIn = g => manifest.themes.filter(t => groupOf(t.name) === g);
-let filter = 'all';                  // all | commented | revised(보완안 꼬리표) | hidden | trash
+let filter = 'all';                  // all | commented | revised(보완안 꼬리표) | final(확정안 꼬리표) | hidden | trash
 let view = null;                     // null | '보완안' | '확정안' — 머리의 «… 보기» 꼬리표: 켜 두면 탭을 옮겨도 그 꼬리표가 붙은 것만 보인다
 let sort = store.get('gm.sort4', 'manual');   // manual(배치순, 기본) | latest | rating — 2026-10-12 키를 바꿔 배치순을 새 기본으로
 //   // latest(기본: 별점 있는 것 먼저 + 최신순) | rating — 2026-10-12 저장 키를 바꿔 기존 선택도 새 기본으로
@@ -430,7 +430,7 @@ function seqOf(t) {                          // 지금 필터에서 보이는 �
   if (filter === 'trash') return trashOf(t);
   const { kids, roots } = treeOf(t), out = [];
   const walk = it => { out.push(it); srt(kids[it.key] || []).forEach(walk); };
-  srt(filter === 'commented' ? roots.filter(r => hasCommentBelow(r.key, kids)) : filter === 'revised' ? roots.filter(r => tagOf(r)) : roots).forEach(walk);
+  srt(filter === 'commented' ? roots.filter(r => hasCommentBelow(r.key, kids)) : filter === 'revised' ? roots.filter(r => tagOf(r)) : filter === 'final' ? roots.filter(r => finalOf(r)) : roots).forEach(walk);
   return out;
 }
 const hasCommentBelow = key => commentsOf(key).length > 0;
@@ -523,19 +523,19 @@ function renderGrid() {
   if (!t) { list.innerHTML = '<p class="bar">이미지가 없습니다.</p>'; return; }
   const { kids, roots } = treeOf(t);
   const commented = roots.filter(r => hasCommentBelow(r.key, kids));
-  const hid = hiddenOf(t), trs = trashOf(t), rev = roots.filter(r => tagOf(r));
-  $('#filters').innerHTML = [['all', '전체', roots.length], ['commented', '댓글 있는 것', commented.length], ['revised', '보완안', rev.length], ['hidden', '숨긴 것', hid.length], ['trash', '휴지통', trs.length]]
+  const hid = hiddenOf(t), trs = trashOf(t), rev = roots.filter(r => tagOf(r)), fin = roots.filter(r => finalOf(r));
+  $('#filters').innerHTML = [['all', '전체', roots.length], ['commented', '댓글 있는 것', commented.length], ['revised', '보완안', rev.length], ['final', '확정안', fin.length], ['hidden', '숨긴 것', hid.length], ['trash', '휴지통', trs.length]]
     .map(([v, l, n]) => `<button data-f="${v}" aria-pressed="${filter === v}">${l} ${n}</button>`).join('');
   $('#filters').querySelectorAll('button').forEach(b => b.onclick = () => { filter = b.dataset.f; renderGrid(); });
   $('#sorts').innerHTML = [['manual', '배치순'], ['latest', '최신순'], ['rating', '별점순']]
     .map(([v, l]) => `<button data-s="${v}" aria-pressed="${sort === v}">${l}</button>`).join('');
   $('#sorts').querySelectorAll('button').forEach(b => b.onclick = () => { sort = b.dataset.s; store.set('gm.sort4', sort); renderGrid(); });
   const flat = filter === 'hidden' || filter === 'trash';
-  const shown = filter === 'trash' ? trs : srt(filter === 'hidden' ? hid : filter === 'commented' ? commented : filter === 'revised' ? rev : roots);
+  const shown = filter === 'trash' ? trs : srt(filter === 'hidden' ? hid : filter === 'commented' ? commented : filter === 'revised' ? rev : filter === 'final' ? fin : roots);
   const scroll = window.scrollY;
   list.innerHTML = shown.length
     ? `<div class="grid">${shown.map(it => flat ? tileHTML(it, {}, true) : tileHTML(it, kids)).join('')}</div>`
-    : `<p class="bar">${filter === 'trash' ? '휴지통이 비었습니다.' : filter === 'hidden' ? '숨긴 이미지가 없습니다.' : filter === 'commented' ? '댓글이 달린 이미지가 없습니다.' : filter === 'revised' ? '보완안 꼬리표가 붙은 이미지가 없습니다.' : '이미지가 없습니다.'}</p>`;
+    : `<p class="bar">${filter === 'trash' ? '휴지통이 비었습니다.' : filter === 'hidden' ? '숨긴 이미지가 없습니다.' : filter === 'commented' ? '댓글이 달린 이미지가 없습니다.' : filter === 'revised' ? '보완안 꼬리표가 붙은 이미지가 없습니다.' : filter === 'final' ? '확정안 꼬리표가 붙은 이미지가 없습니다. 썸네일을 우클릭해 «확정안 체크» 를 누르면 여기 보입니다.' : '이미지가 없습니다.'}</p>`;
   bindGrid(list, t);
   window.scrollTo(0, scroll);
 }
