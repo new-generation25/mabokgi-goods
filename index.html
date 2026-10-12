@@ -611,8 +611,11 @@ function paintSel() {
   document.querySelectorAll('#list .tile').forEach(x => x.classList.toggle('sel', selected.has(x.dataset.key)));
   const bar = $('#selbar');
   if (!bar) return;
-  bar.innerHTML = selected.size ? `${selected.size}개 선택 · 하나를 끌면 함께 옮겨집니다 <button data-clear>× 선택 해제</button>` : '';
+  const allFin = selected.size && [...selected].every(k => hasMark(itemOf(k) || { key: k }, '확정안'));
+  bar.innerHTML = selected.size ? `${selected.size}개 선택 · 하나를 끌면 함께 옮겨집니다
+    <button data-fin>${allFin ? '✓ 확정안 체크 해제' : '✓ 확정안 체크'}</button> <button data-clear>× 선택 해제</button>` : '';
   bar.querySelector('[data-clear]')?.addEventListener('click', clearSel);
+  bar.querySelector('[data-fin]')?.addEventListener('click', () => setMarkMany([...selected], '확정안', !allFin));
 }
 function clearSel() { selected.clear(); lastSel = null; paintSel(); }
 
@@ -641,7 +644,13 @@ function showMenu(x, y, key) {
   const m = document.createElement('div');
   m.className = 'ctx'; m.id = 'ctx';
   const hid = !!data.hidden[key], tr = !!data.trashed[key];
-  m.innerHTML = `<button data-a="open">크게 보기 · 댓글</button>
+  // 여러 장을 고른 상태에서 그중 하나를 우클릭하면 고른 것 모두에 꼬리표를 한꺼번에 단다
+  const many = selected.size > 1 && selected.has(key) ? [...selected] : null;
+  const allOn = mk => many.every(k => hasMark(itemOf(k) || { key: k }, mk));
+  m.innerHTML = many ? `<button disabled>${many.length}장 선택됨</button>
+    ${MARKS.map(mk => `<button data-many="${mk}">${allOn(mk) ? `${mk} 체크 해제 (${many.length}장)` : `${mk} 체크 (${many.length}장)`}</button>`).join('')}
+    <button data-a="clear">선택 해제</button>`
+  : `<button data-a="open">크게 보기 · 댓글</button>
     <button data-a="copy">이미지 복사</button>
     ${tr ? '' : `<button data-a="hide">${hid ? '다시 보이기' : '숨기기'}</button>`}
     ${tr ? '' : MARKS.map(mk => `<button data-mark="${mk}">${hasMark(itemOf(key) || { key }, mk) ? `${mk} 체크 해제` : `${mk} 체크`}</button>`).join('')}
@@ -650,6 +659,11 @@ function showMenu(x, y, key) {
   const r = m.getBoundingClientRect();
   m.style.left = Math.min(x, innerWidth - r.width - 8) + 'px';
   m.style.top = Math.min(y, innerHeight - r.height - 8) + 'px';
+  if (many) {
+    m.querySelectorAll('[data-many]').forEach(b => b.onclick = () => { closeMenu(); setMarkMany(many, b.dataset.many, !allOn(b.dataset.many)); });
+    m.querySelector('[data-a=clear]').onclick = () => { closeMenu(); clearSel(); };
+    return;
+  }
   m.querySelector('[data-a=open]').onclick = () => { closeMenu(); openDetail(key); };
   m.querySelector('[data-a=copy]').onclick = () => { closeMenu(); copyImage(key); };
   m.querySelector('[data-a=hide]')?.addEventListener('click', () => { closeMenu(); setHidden(key, !hid); });
@@ -711,6 +725,25 @@ async function setMark(key, mark, on) {
     if (before === undefined) delete data.tags[key]; else data.tags[key] = before;
     renderGrid(); if (current) renderDetail(); toast('바꾸지 못했습니다: ' + err.message);
   }
+}
+
+// 여러 장에 같은 꼬리표를 한꺼번에 달거나 뗀다 — 화면은 먼저 바꾸고, 저장에 실패한 것만 되돌린다
+async function setMarkMany(keys, mark, on) {
+  const before = {}, values = {};
+  keys.forEach(key => {
+    before[key] = data.tags[key];
+    const ms = marksOf(itemOf(key) || { key }).filter(x => x !== mark);
+    if (on) ms.push(mark);
+    values[key] = MARKS.filter(x => ms.includes(x)).join(',') || '-';
+    data.tags[key] = values[key];
+  });
+  renderGrid(); if (current) renderDetail();
+  const res = await Promise.allSettled(keys.map(key => api('POST', { action: 'tag', key, value: values[key] })));
+  const failed = keys.filter((k, i) => res[i].status === 'rejected');
+  failed.forEach(key => { if (before[key] === undefined) delete data.tags[key]; else data.tags[key] = before[key]; });
+  if (failed.length) { renderGrid(); if (current) renderDetail(); }
+  toast(failed.length ? `${keys.length - failed.length}장 바꿈 · ${failed.length}장 실패: ${res.find(r => r.status === 'rejected').reason.message}`
+                      : `${keys.length}장 ${on ? `${mark} 체크했습니다` : `${mark} 체크를 해제했습니다`}`);
 }
 
 async function setTrashed(key, trashed) {
